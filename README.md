@@ -134,13 +134,15 @@ response_variable: product_details
 
 ## Example Automation: New Order Notification
 
-Trigger an alert or ESP32 display animation whenever a new order is received:
+> [!NOTE]
+> The ESP32 display firmware **already triggers fireworks automatically** on new orders internally without requiring any Home Assistant automations.
+> The automation below is **optional**, useful if you also want Home Assistant to send mobile push notifications or trigger room lights when an order arrives.
 
 ```yaml
 alias: "WooCommerce - New Order Alert"
 trigger:
   - platform: state
-    entity_id: sensor.mystore_total_orders
+    entity_id: sensor.<your_store>_total_orders
 condition:
   - condition: template
     value_template: "{{ trigger.to_state.state | int > trigger.from_state.state | int }}"
@@ -149,7 +151,41 @@ action:
     data:
       title: "🎉 New WooCommerce Order!"
       message: >
-        Order {{ states('sensor.mystore_latest_order') }} received.
-        Customer: {{ state_attr('sensor.mystore_latest_order', 'customer_name') }}
-        Total: {{ state_attr('sensor.mystore_latest_order', 'total') }} {{ state_attr('sensor.mystore_latest_order', 'currency') }}
+        Order {{ states('sensor.<your_store>_latest_order') }} received.
+        Customer: {{ state_attr('sensor.<your_store>_latest_order', 'customer_name') }}
+        Total: {{ state_attr('sensor.<your_store>_latest_order', 'total') }} {{ state_attr('sensor.<your_store>_latest_order', 'currency') }}
 ```
+
+---
+
+## Lovelace Dashboard
+
+A pre-built, responsive Home Assistant dashboard view is provided in [`examples/dashboard.yaml`](file:///home/daz/Source/woocommerce_integration/examples/dashboard.yaml).
+
+Features included:
+- **KPI Metrics Cards**: Orders Processing, Total Orders, Sales Today, In-Stock Products.
+- **Pipeline Breakdown**: Counts across all stages (Processing, Pending, On Hold, Completed, Failed, Cancelled, Refunded).
+- **Inventory Watchlist**: In Stock, Low Stock, and Out of Stock indicators.
+- **Latest Order Card**: Real-time display of recent customer details, amounts, and dates.
+- **Controls & Actions**: Quick buttons to refresh store data on demand, test the ESP32 fireworks animation, and toggle display backlight.
+
+To use: Create a new Lovelace dashboard or view in Home Assistant, open the **Raw configuration editor**, and paste the contents of [`examples/dashboard.yaml`](file:///home/daz/Source/woocommerce_integration/examples/dashboard.yaml).
+
+---
+
+## ESPHome Companion Display
+
+This repository includes full ESPHome firmware for a companion desktop display using the **Waveshare ESP32-S3-Touch-LCD-1.28** (round 240x240 GC9A01 LCD with capacitive touch).
+
+<p align="center">
+  <img src="https://ae-pic-a1.aliexpress-media.com/kf/Scf21ca3c86524144bc59143335c689beM.jpg" alt="Waveshare ESP32-S3-Touch-LCD-1.28" width="260">
+</p>
+
+- **Processing-Centric Dashboard**: High-visibility 2-digit order processing metric in the center.
+- **Connection Indicator**: Top notification dot (🟢 Connected, 🟡 Waiting for HA, 🔴 Offline).
+- **Failed Orders Alert**: Bottom warning badge appears automatically if any orders fail.
+- **Touch-to-Refresh**: Tap anywhere on the screen to trigger an immediate Home Assistant data update.
+- **Celebratory Fireworks**: Full-screen starburst animation on new orders.
+
+See the [ESPHome Display Documentation](file:///home/daz/Source/woocommerce_integration/esphome/README.md) for pinout tables, configuration guides, and flashing instructions.
+

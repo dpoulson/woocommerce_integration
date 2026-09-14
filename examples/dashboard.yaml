@@ -1,0 +1,137 @@
+# Full Home Assistant Dashboard (Native Sections View for HA 2024+)
+#
+# HOW TO USE:
+# 1. In Home Assistant, go to Settings -> Dashboards -> Add Dashboard (New dashboard from scratch).
+# 2. Open the dashboard, click the 3 dots in the top right -> Edit Dashboard -> 3 dots -> Raw configuration editor.
+# 3. Select all (Ctrl+A), paste this entire YAML, and replace '<your_store>' with your store prefix
+#    (e.g., 'we_make_things_co_uk').
+# 4. Click Save.
+
+views:
+  - title: "WooCommerce Store"
+    icon: "mdi:cart"
+    path: "woocommerce"
+    type: sections
+    max_columns: 4
+    badges:
+      - entity: sensor.<your_store>_orders_processing
+      - entity: sensor.<your_store>_orders_failed
+      - entity: sensor.<your_store>_sales_today
+
+    sections:
+      # --- Section 1: Store Overview KPIs ---
+      - title: "Overview"
+        cards:
+          - type: tile
+            entity: sensor.<your_store>_orders_processing
+            name: "Processing"
+            icon: mdi:progress-clock
+            color: amber
+
+          - type: tile
+            entity: sensor.<your_store>_total_orders
+            name: "Total Orders"
+            icon: mdi:cart-check
+            color: indigo
+
+          - type: tile
+            entity: sensor.<your_store>_sales_today
+            name: "Sales Today"
+            icon: mdi:currency-gbp
+            color: green
+
+          - type: tile
+            entity: sensor.<your_store>_products_in_stock
+            name: "In Stock"
+            icon: mdi:package-variant-closed
+            color: blue
+
+      # --- Section 2: Order Pipeline Breakdown ---
+      - title: "Order Pipeline"
+        cards:
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: sensor.<your_store>_orders_processing
+                name: "Processing"
+                icon: mdi:progress-clock
+              - entity: sensor.<your_store>_orders_pending
+                name: "Pending Payment"
+                icon: mdi:clock-alert-outline
+              - entity: sensor.<your_store>_orders_on_hold
+                name: "On Hold"
+                icon: mdi:pause-circle-outline
+              - entity: sensor.<your_store>_orders_completed
+                name: "Completed"
+                icon: mdi:check-circle-outline
+              - entity: sensor.<your_store>_orders_failed
+                name: "Failed"
+                icon: mdi:alert-circle-outline
+              - entity: sensor.<your_store>_orders_cancelled
+                name: "Cancelled"
+                icon: mdi:close-circle-outline
+              - entity: sensor.<your_store>_orders_refunded
+                name: "Refunded"
+                icon: mdi:cash-refund
+
+      # --- Section 3: Inventory Health ---
+      - title: "Inventory Health"
+        cards:
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: sensor.<your_store>_total_products
+                name: "Total Catalog Products"
+                icon: mdi:cube-outline
+              - entity: sensor.<your_store>_products_in_stock
+                name: "In Stock"
+                icon: mdi:check-bold
+              - entity: sensor.<your_store>_products_low_stock
+                name: "Low Stock Items"
+                icon: mdi:alert
+              - entity: sensor.<your_store>_products_out_of_stock
+                name: "Out of Stock Items"
+                icon: mdi:close-octagon-outline
+
+      # --- Section 4: Latest Order & Display Controls ---
+      - title: "Latest Order & Display"
+        cards:
+          - type: markdown
+            title: "Latest Order"
+            content: >
+              {% set order = states('sensor.<your_store>_latest_order') %}
+              {% if order != 'None' and order != 'unavailable' %}
+                ### {{ order }}
+                **Customer:** {{ state_attr('sensor.<your_store>_latest_order', 'customer_name') }}  
+                **Total:** {{ state_attr('sensor.<your_store>_latest_order', 'total') }} {{ state_attr('sensor.<your_store>_latest_order', 'currency') }}  
+                **Status:** {{ state_attr('sensor.<your_store>_latest_order', 'status') | title }}  
+                **Date:** {{ state_attr('sensor.<your_store>_latest_order', 'date_created') }}  
+              {% else %}
+                *No recent orders available.*
+              {% endif %}
+
+          - type: entities
+            title: "Display Controls"
+            show_header_toggle: false
+            entities:
+              - entity: light.woocommerce_display_display_backlight
+                name: "ESP32 Display Backlight"
+                icon: mdi:monitor
+            footer:
+              type: buttons
+              entities:
+                - entity: sensor.<your_store>_orders_processing
+                  name: "Refresh Store"
+                  icon: mdi:refresh
+                  tap_action:
+                    action: call-service
+                    service: homeassistant.update_entity
+                    target:
+                      entity_id: sensor.<your_store>_orders_processing
+
+                - entity: sensor.<your_store>_total_orders
+                  name: "Test Fireworks"
+                  icon: mdi:creation
+                  tap_action:
+                    action: call-service
+                    service: esphome.woocommerce_display_trigger_fireworks
