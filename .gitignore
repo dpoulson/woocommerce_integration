@@ -1,7 +1,37 @@
+# Python
 .venv/
+venv/
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+
+# Testing & Linting
 .pytest_cache/
 .coverage
 htmlcov/
+.ruff_cache/
+
+# ESPHome & Firmware Builds
+**/.esphome/
+.esphome/
+esphome/.gitignore
+*.bin
+*.elf
+*.o
+*.a
+
+# Secrets & Credentials
+*secrets.yaml
+**/*secrets.yaml
+secrets.h
+**/*secrets.h
+*.env
+*.env.*
+
+# Logs & Temporary Files
+*.log
+.DS_Store
+Thumbs.db
+*~
+*.swp

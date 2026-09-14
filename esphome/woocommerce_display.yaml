@@ -1,33 +1,43 @@
 # ESPHome Configuration for WooCommerce Order Display & Fireworks Animation
-# Target Hardware: ESP32 with SSD1306 128x64 I2C OLED Display (easily adaptable for ST7789 or others)
+# Target Hardware: Waveshare / Spotpear ESP32-S3-Touch-LCD-1.28 (1.28" Round 240x240 GC9A01 LCD with CST816 Touch)
 
 substitutions:
   device_name: "woocommerce-display"
   friendly_name: "WooCommerce Order Display"
-  ha_order_count_sensor: "sensor.mystore_total_orders"
-  ha_latest_order_sensor: "sensor.mystore_latest_order"
+  ha_orders_processing_sensor: "sensor.we_make_things_co_uk_orders_processing"
+  ha_orders_failed_sensor: "sensor.we_make_things_co_uk_orders_failed"
+  ha_order_count_sensor: "sensor.we_make_things_co_uk_total_orders"
 
 esphome:
   name: ${device_name}
   friendly_name: ${friendly_name}
+  on_boot:
+    priority: -100.0
+    then:
+      - light.turn_on:
+          id: back_light
+          brightness: 100%
+      - output.turn_on: rst_12
 
 esp32:
-  board: esp32dev
+  board: esp32-s3-devkitc-1
   framework:
     type: esp-idf
 
+psram:
+  mode: quad
+  speed: 80MHz
+
 # Home Assistant native API connection
 api:
-  encryption:
-    key: !secret api_encryption_key
   services:
     - service: trigger_fireworks
       then:
         - lambda: |-
             id(fireworks_active) = true;
             id(fireworks_timer) = 0;
-            id(burst_x) = random_range(20, 108);
-            id(burst_y) = random_range(15, 45);
+            id(burst_x) = 80 + (rand() % 80);
+            id(burst_y) = 80 + (rand() % 80);
 
 ota:
   - platform: esphome
@@ -37,32 +47,77 @@ wifi:
   password: !secret wifi_password
   ap:
     ssid: "WooCommerce-Display-Hotspot"
-    password: !secret ap_password
+    password: !secret ap_fallback_password
 
 captive_portal:
 
 logger:
+  hardware_uart: UART0
+  baud_rate: 115200
 
-# I2C Bus for SSD1306 Display
+# Home Assistant Connection Status Tracking
+binary_sensor:
+  - platform: status
+    id: ha_connected
+
+# I2C Bus for CST816 Touchscreen & QMI8658
 i2c:
-  sda: GPIO21
-  scl: GPIO22
+  sda: GPIO6
+  scl: GPIO7
   scan: true
-  id: bus_a
 
-# Fonts
+# CST816 Capacitive Touchscreen
+touchscreen:
+  - platform: cst816
+    id: my_touch
+    interrupt_pin: GPIO5
+    reset_pin: GPIO13
+    on_touch:
+      - homeassistant.service:
+          service: homeassistant.update_entity
+          data:
+            entity_id: ${ha_orders_processing_sensor}
+      - lambda: |-
+          id(touch_feedback) = true;
+          id(touch_feedback_timer) = 5;
+
+# SPI Bus for GC9A01 Display (LCD_CLK: GP10, LCD_DIN: GP11)
+spi:
+  clk_pin: GPIO10
+  mosi_pin: GPIO11
+
+# Backlight Output (GPIO2 confirmed on this board revision)
+output:
+  - platform: ledc
+    pin: GPIO2
+    id: backlight_pwm
+  - platform: gpio
+    pin: GPIO12
+    id: rst_12
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    name: "Display Backlight"
+    id: back_light
+    restore_mode: ALWAYS_ON
+
+# Typography
 font:
   - file: "gfonts://Roboto"
-    id: font_small
-    size: 9
+    id: font_tiny
+    size: 11
   - file: "gfonts://Roboto"
-    id: font_medium
+    id: font_small
     size: 14
   - file: "gfonts://Roboto"
-    id: font_large
-    size: 26
+    id: font_medium
+    size: 18
+  - file: "gfonts://Roboto"
+    id: font_massive
+    size: 84
 
-# Track previous order count to detect increment and trigger fireworks locally
+# State tracking for animations, transitions & touch
 globals:
   - id: prev_orders
     type: int
@@ -79,14 +134,30 @@ globals:
   - id: burst_x
     type: int
     restore_value: no
-    initial_value: '64'
+    initial_value: '120'
   - id: burst_y
     type: int
     restore_value: no
-    initial_value: '30'
+    initial_value: '120'
+  - id: touch_feedback
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: touch_feedback_timer
+    type: int
+    restore_value: no
+    initial_value: '0'
 
-# Import sensors from Home Assistant
+# Sensors imported from Home Assistant
 sensor:
+  - platform: homeassistant
+    id: orders_processing
+    entity_id: ${ha_orders_processing_sensor}
+
+  - platform: homeassistant
+    id: orders_failed
+    entity_id: ${ha_orders_failed_sensor}
+
   - platform: homeassistant
     id: order_count
     entity_id: ${ha_order_count_sensor}
@@ -95,75 +166,145 @@ sensor:
         - lambda: |-
             int current = (int)x;
             if (id(prev_orders) > 0 && current > id(prev_orders)) {
-              // Order increment detected! Trigger fireworks animation
               id(fireworks_active) = true;
               id(fireworks_timer) = 0;
-              id(burst_x) = random_range(20, 108);
-              id(burst_y) = random_range(15, 45);
+              id(burst_x) = 80 + (rand() % 80);
+              id(burst_y) = 80 + (rand() % 80);
             }
             id(prev_orders) = current;
 
-text_sensor:
-  - platform: homeassistant
-    id: latest_order
-    entity_id: ${ha_latest_order_sensor}
+# Colors Definition
+color:
+  - id: color_wc_purple
+    red: 49%
+    green: 33%
+    blue: 70%
+  - id: color_white
+    red: 100%
+    green: 100%
+    blue: 100%
+  - id: color_gold
+    red: 100%
+    green: 84%
+    blue: 0%
+  - id: color_bg
+    red: 4%
+    green: 4%
+    blue: 7%
+  - id: color_green
+    red: 15%
+    green: 85%
+    blue: 40%
+  - id: color_red
+    red: 90%
+    green: 20%
+    blue: 20%
+  - id: color_dim
+    red: 40%
+    green: 40%
+    blue: 50%
 
-# SSD1306 Display with Fireworks Animation Logic
+# 1.28" Round GC9A01 Display (240x240)
 display:
-  - platform: ssd1306_i2c
-    model: "SSD1306 128x64"
-    address: 0x3C
-    i2c_id: bus_a
+  - platform: ili9xxx
+    model: GC9A01A
+    cs_pin: GPIO9
+    dc_pin: GPIO8
+    reset_pin: GPIO14
+    invert_colors: true
+    data_rate: 20MHz
+    dimensions:
+      height: 240
+      width: 240
+      offset_height: 0
+      offset_width: 0
     update_interval: 100ms
     lambda: |-
       if (id(fireworks_active)) {
-        // Fireworks Animation Phase (runs for ~30 frames / 3 seconds)
+        // --- CELEBRATORY FIREWORKS DISPLAY (240x240 Round Screen) ---
+        it.fill(id(color_bg));
+
         int t = id(fireworks_timer);
         int cx = id(burst_x);
         int cy = id(burst_y);
 
-        // Particle burst rays
-        const int ray_count = 12;
+        // Multi-colored Particle Starburst (16 rays)
+        const int ray_count = 16;
         float angle_step = 6.2831853 / ray_count;
-        int max_r = (t < 15) ? (t * 2) : 30;
+        int max_r = (t < 18) ? (t * 5) : 85;
 
         for (int i = 0; i < ray_count; i++) {
           float angle = i * angle_step;
-          int px1 = cx + (int)(cos(angle) * (max_r * 0.4));
-          int py1 = cy + (int)(sin(angle) * (max_r * 0.4));
+          int px1 = cx + (int)(cos(angle) * (max_r * 0.35));
+          int py1 = cy + (int)(sin(angle) * (max_r * 0.35));
           int px2 = cx + (int)(cos(angle) * max_r);
           int py2 = cy + (int)(sin(angle) * max_r);
-          it.line(px1, py1, px2, py2);
-          // Sparkle tip
-          it.draw_pixel_at(px2, py2, COLOR_ON);
+
+          Color ray_color = (i % 3 == 0) ? id(color_gold) : ((i % 3 == 1) ? id(color_white) : id(color_wc_purple));
+          it.line(px1, py1, px2, py2, ray_color);
+          it.filled_circle(px2, py2, 2, ray_color);
         }
 
-        // Celebratory banner in center
-        it.printf(64, 48, id(font_small), TextAlign::TOP_CENTER, "NEW ORDER!");
+        // Center Gold Burst
+        it.filled_circle(cx, cy, (t < 10) ? (10 - t) : 2, id(color_gold));
+
+        // Celebratory Center Banner
+        it.filled_rectangle(20, 96, 200, 48, id(color_wc_purple));
+        it.printf(120, 101, id(font_medium), id(color_gold), TextAlign::TOP_CENTER, "NEW ORDER!");
+        it.printf(120, 125, id(font_small), id(color_white), TextAlign::TOP_CENTER, "Received");
 
         id(fireworks_timer)++;
-        if (id(fireworks_timer) > 30) {
+        if (id(fireworks_timer) > 35) { // ~3.5 seconds
           id(fireworks_active) = false;
           id(fireworks_timer) = 0;
         }
       } else {
-        // Normal Dashboard View
-        // Header
-        it.printf(64, 2, id(font_small), TextAlign::TOP_CENTER, "WOOCOMMERCE ORDERS");
-        it.horizontal_line(10, 13, 108);
+        // --- NORMAL LIVE STORE DASHBOARD (Orders Processing Centric) ---
+        it.fill(id(color_bg));
 
-        // Large Total Order Count
-        if (id(order_count).has_state()) {
-          it.printf(64, 16, id(font_large), TextAlign::TOP_CENTER, "%d", (int)id(order_count).state);
+        // Outer Circular Accent Ring (glows gold on touch feedback)
+        if (id(touch_feedback)) {
+          it.circle(120, 120, 118, id(color_gold));
+          it.circle(120, 120, 117, id(color_gold));
+          id(touch_feedback_timer)--;
+          if (id(touch_feedback_timer) <= 0) {
+            id(touch_feedback) = false;
+          }
         } else {
-          it.printf(64, 16, id(font_large), TextAlign::TOP_CENTER, "---");
+          it.circle(120, 120, 118, id(color_wc_purple));
+          it.circle(120, 120, 117, id(color_wc_purple));
         }
 
-        // Footer with latest order
-        it.horizontal_line(10, 48, 108);
-        if (id(latest_order).has_state()) {
-          it.printf(64, 52, id(font_small), TextAlign::TOP_CENTER, "Latest: %s", id(latest_order).state.c_str());
+        // 1. TOP NOTIFICATION DOT (WiFi & Home Assistant Connection)
+        bool ha_ok = id(ha_connected).state;
+        bool net_ok = network::is_connected();
+        if (ha_ok && net_ok) {
+          it.filled_circle(120, 24, 4, id(color_green));
+        } else if (net_ok) {
+          it.filled_circle(120, 24, 4, id(color_gold)); // WiFi only
         } else {
-          it.printf(64, 52, id(font_small), TextAlign::TOP_CENTER, "Waiting for data...");
+          it.filled_circle(120, 24, 4, id(color_red));  // Disconnected
+        }
+
+        // 2. CATEGORY LABEL: "PROCESSING"
+        it.printf(120, 46, id(font_medium), id(color_dim), TextAlign::TOP_CENTER, "PROCESSING");
+
+        // 3. BULK OF DISPLAY: Massive Orders Processing (0-99)
+        int proc_count = 0;
+        if (id(orders_processing).has_state()) {
+          proc_count = (int)id(orders_processing).state;
+          Color num_color = (proc_count > 0) ? id(color_gold) : id(color_white);
+          it.printf(120, 72, id(font_massive), num_color, TextAlign::TOP_CENTER, "%d", proc_count);
+        } else {
+          it.printf(120, 72, id(font_massive), id(color_dim), TextAlign::TOP_CENTER, "--");
+        }
+
+        // 4. BOTTOM ALERT ICON (Only visible if there are failed orders)
+        if (id(orders_failed).has_state() && id(orders_failed).state > 0) {
+          int failed_count = (int)id(orders_failed).state;
+          // Red alert badge circle with exclamation mark
+          it.filled_circle(120, 192, 10, id(color_red));
+          it.printf(120, 184, id(font_small), id(color_white), TextAlign::TOP_CENTER, "!");
+          it.printf(120, 208, id(font_tiny), id(color_red), TextAlign::TOP_CENTER, "%d Failed", failed_count);
         }
       }
