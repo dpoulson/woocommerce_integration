@@ -1,0 +1,12 @@
+{
+  "domain": "woocommerce_store",
+  "name": "WooCommerce Store",
+  "codeowners": ["@daz"],
+  "config_flow": true,
+  "documentation": "https://github.com/daz/woocommerce_integration",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/daz/woocommerce_integration/issues",
+  "requirements": [],
+  "version": "1.0.0"
+}

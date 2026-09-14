@@ -1,0 +1,34 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to WooCommerce",
+        "description": "Enter your WooCommerce store details and REST API credentials (with Read permissions).",
+        "data": {
+          "url": "Store URL (e.g. https://mystore.com)",
+          "consumer_key": "Consumer Key (ck_...)",
+          "consumer_secret": "Consumer Secret (cs_...)",
+          "verify_ssl": "Verify SSL Certificate"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to WooCommerce store. Verify URL and network.",
+      "invalid_auth": "Invalid Consumer Key or Consumer Secret, or insufficient permissions.",
+      "unknown": "Unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This WooCommerce store is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "WooCommerce Options",
+        "data": {
+          "update_interval": "Data Refresh Interval (seconds)"
+        }
+      }
+    }
+  }
+}

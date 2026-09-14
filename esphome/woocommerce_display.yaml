@@ -1,0 +1,169 @@
+# ESPHome Configuration for WooCommerce Order Display & Fireworks Animation
+# Target Hardware: ESP32 with SSD1306 128x64 I2C OLED Display (easily adaptable for ST7789 or others)
+
+substitutions:
+  device_name: "woocommerce-display"
+  friendly_name: "WooCommerce Order Display"
+  ha_order_count_sensor: "sensor.mystore_total_orders"
+  ha_latest_order_sensor: "sensor.mystore_latest_order"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+# Home Assistant native API connection
+api:
+  encryption:
+    key: !secret api_encryption_key
+  services:
+    - service: trigger_fireworks
+      then:
+        - lambda: |-
+            id(fireworks_active) = true;
+            id(fireworks_timer) = 0;
+            id(burst_x) = random_range(20, 108);
+            id(burst_y) = random_range(15, 45);
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "WooCommerce-Display-Hotspot"
+    password: !secret ap_password
+
+captive_portal:
+
+logger:
+
+# I2C Bus for SSD1306 Display
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+  scan: true
+  id: bus_a
+
+# Fonts
+font:
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 9
+  - file: "gfonts://Roboto"
+    id: font_medium
+    size: 14
+  - file: "gfonts://Roboto"
+    id: font_large
+    size: 26
+
+# Track previous order count to detect increment and trigger fireworks locally
+globals:
+  - id: prev_orders
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: fireworks_active
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: fireworks_timer
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: burst_x
+    type: int
+    restore_value: no
+    initial_value: '64'
+  - id: burst_y
+    type: int
+    restore_value: no
+    initial_value: '30'
+
+# Import sensors from Home Assistant
+sensor:
+  - platform: homeassistant
+    id: order_count
+    entity_id: ${ha_order_count_sensor}
+    on_value:
+      then:
+        - lambda: |-
+            int current = (int)x;
+            if (id(prev_orders) > 0 && current > id(prev_orders)) {
+              // Order increment detected! Trigger fireworks animation
+              id(fireworks_active) = true;
+              id(fireworks_timer) = 0;
+              id(burst_x) = random_range(20, 108);
+              id(burst_y) = random_range(15, 45);
+            }
+            id(prev_orders) = current;
+
+text_sensor:
+  - platform: homeassistant
+    id: latest_order
+    entity_id: ${ha_latest_order_sensor}
+
+# SSD1306 Display with Fireworks Animation Logic
+display:
+  - platform: ssd1306_i2c
+    model: "SSD1306 128x64"
+    address: 0x3C
+    i2c_id: bus_a
+    update_interval: 100ms
+    lambda: |-
+      if (id(fireworks_active)) {
+        // Fireworks Animation Phase (runs for ~30 frames / 3 seconds)
+        int t = id(fireworks_timer);
+        int cx = id(burst_x);
+        int cy = id(burst_y);
+
+        // Particle burst rays
+        const int ray_count = 12;
+        float angle_step = 6.2831853 / ray_count;
+        int max_r = (t < 15) ? (t * 2) : 30;
+
+        for (int i = 0; i < ray_count; i++) {
+          float angle = i * angle_step;
+          int px1 = cx + (int)(cos(angle) * (max_r * 0.4));
+          int py1 = cy + (int)(sin(angle) * (max_r * 0.4));
+          int px2 = cx + (int)(cos(angle) * max_r);
+          int py2 = cy + (int)(sin(angle) * max_r);
+          it.line(px1, py1, px2, py2);
+          // Sparkle tip
+          it.draw_pixel_at(px2, py2, COLOR_ON);
+        }
+
+        // Celebratory banner in center
+        it.printf(64, 48, id(font_small), TextAlign::TOP_CENTER, "NEW ORDER!");
+
+        id(fireworks_timer)++;
+        if (id(fireworks_timer) > 30) {
+          id(fireworks_active) = false;
+          id(fireworks_timer) = 0;
+        }
+      } else {
+        // Normal Dashboard View
+        // Header
+        it.printf(64, 2, id(font_small), TextAlign::TOP_CENTER, "WOOCOMMERCE ORDERS");
+        it.horizontal_line(10, 13, 108);
+
+        // Large Total Order Count
+        if (id(order_count).has_state()) {
+          it.printf(64, 16, id(font_large), TextAlign::TOP_CENTER, "%d", (int)id(order_count).state);
+        } else {
+          it.printf(64, 16, id(font_large), TextAlign::TOP_CENTER, "---");
+        }
+
+        // Footer with latest order
+        it.horizontal_line(10, 48, 108);
+        if (id(latest_order).has_state()) {
+          it.printf(64, 52, id(font_small), TextAlign::TOP_CENTER, "Latest: %s", id(latest_order).state.c_str());
+        } else {
+          it.printf(64, 52, id(font_small), TextAlign::TOP_CENTER, "Waiting for data...");
+        }
+      }

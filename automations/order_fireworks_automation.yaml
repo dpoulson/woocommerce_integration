@@ -1,0 +1,29 @@
+# Home Assistant Automation to Trigger Fireworks on ESP32 Order Display
+# When the WooCommerce total orders sensor increments, trigger the ESPHome fireworks service.
+
+alias: "WooCommerce - Trigger ESP32 Fireworks on New Order"
+description: "Detects when total orders increments and triggers the fireworks animation on the ESP32 display."
+trigger:
+  - platform: state
+    entity_id: sensor.mystore_total_orders
+condition:
+  # Ensure both from_state and to_state are numeric and order count increased
+  - condition: template
+    value_template: >
+      {{ trigger.from_state is not none and
+         trigger.to_state is not none and
+         trigger.to_state.state | int(0) > trigger.from_state.state | int(0) }}
+action:
+  # 1. Trigger the fireworks animation service exposed by the ESPHome node
+  - service: esphome.woocommerce_display_trigger_fireworks
+    data: {}
+
+  # 2. Optional: Send persistent notification with order details
+  - service: notify.persistent_notification
+    data:
+      title: "🎉 New Order Received!"
+      message: >
+        Order {{ states('sensor.mystore_latest_order') }}
+        Customer: {{ state_attr('sensor.mystore_latest_order', 'customer_name') }}
+        Amount: {{ state_attr('sensor.mystore_latest_order', 'total') }} {{ state_attr('sensor.mystore_latest_order', 'currency') }}
+mode: single
