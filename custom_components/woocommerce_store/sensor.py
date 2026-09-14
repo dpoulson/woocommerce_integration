@@ -125,6 +125,9 @@ PRODUCT_SENSORS: tuple[WooCommerceSensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="products",
         value_fn=lambda data: data.products_totals.get("lowstock", 0),
+        attrs_fn=lambda data: {
+            "items": data.products_totals.get("lowstock_items", [])
+        },
     ),
     WooCommerceSensorEntityDescription(
         key="products_outofstock",
@@ -133,6 +136,9 @@ PRODUCT_SENSORS: tuple[WooCommerceSensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="products",
         value_fn=lambda data: data.products_totals.get("outofstock", 0),
+        attrs_fn=lambda data: {
+            "items": data.products_totals.get("outofstock_items", [])
+        },
     ),
 )
 

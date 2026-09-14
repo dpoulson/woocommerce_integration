@@ -1,3 +1,31 @@
 refresh:
   name: Refresh Data
   description: Manually trigger an immediate update of WooCommerce store statistics.
+
+get_order:
+  name: Get Order Details
+  description: Query the WooCommerce REST API on demand for details of a specific order.
+  fields:
+    order_id:
+      name: Order ID
+      description: The numerical ID of the order to query.
+      required: true
+      example: 1024
+      selector:
+        number:
+          min: 1
+          mode: box
+
+get_product:
+  name: Get Product Details
+  description: Query the WooCommerce REST API on demand for real-time stock, price, and details of a specific product.
+  fields:
+    product_id:
+      name: Product ID
+      description: The numerical ID of the product to query.
+      required: true
+      example: 45
+      selector:
+        number:
+          min: 1
+          mode: box

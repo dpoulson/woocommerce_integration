@@ -29,7 +29,7 @@ class WooCommerceData:
     """Consolidated store data."""
 
     orders_totals: dict[str, int]
-    products_totals: dict[str, int]
+    products_totals: dict[str, Any]
     recent_orders: list[dict[str, Any]]
     sales_today: dict[str, Any] | None = None
 
@@ -170,13 +170,15 @@ class WooCommerceApiClient:
                     totals[slug] = int(total)
         return totals
 
-    async def get_products_totals(self) -> dict[str, int]:
+    async def get_products_totals(self) -> dict[str, Any]:
         """Fetch product count metrics."""
-        totals: dict[str, int] = {
+        totals: dict[str, Any] = {
             "total": 0,
             "instock": 0,
             "lowstock": 0,
             "outofstock": 0,
+            "lowstock_items": [],
+            "outofstock_items": [],
         }
 
         # 1. Fetch products totals by type (simple, variable, etc.) and calculate total count
@@ -203,17 +205,71 @@ class WooCommerceApiClient:
             except WooCommerceApiError as err:
                 _LOGGER.debug("Could not fetch products total via header: %s", err)
 
-        # 3. Try wc-analytics stock stats (provides low stock & out of stock)
+        # 3. Calculate stock metrics directly from product items
         try:
-            stock_data = await self._request("reports/stock/stats", namespace="wc-analytics")
-            if isinstance(stock_data, dict) and "totals" in stock_data:
-                analytics_totals = stock_data["totals"]
-                totals["lowstock"] = int(analytics_totals.get("products_low_stock", 0))
-                totals["outofstock"] = int(analytics_totals.get("products_out_of_stock", 0))
-                totals["instock"] = max(0, totals["total"] - totals["outofstock"])
+            pages_to_fetch = min(5, (totals["total"] + 99) // 100) if totals["total"] > 0 else 1
+            tasks = [
+                self._request(
+                    "products",
+                    params={
+                        "per_page": 100,
+                        "page": page,
+                        "status": "publish",
+                        "_fields": "id,name,price,manage_stock,stock_quantity,stock_status,low_stock_amount",
+                    },
+                )
+                for page in range(1, pages_to_fetch + 1)
+            ]
+            pages_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            instock = 0
+            lowstock = 0
+            outofstock = 0
+            lowstock_items: list[dict[str, Any]] = []
+            outofstock_items: list[dict[str, Any]] = []
+            found_any = False
+
+            for res in pages_results:
+                if isinstance(res, list):
+                    found_any = True
+                    for p in res:
+                        status = p.get("stock_status")
+                        qty = p.get("stock_quantity")
+                        managed = p.get("manage_stock", False)
+                        raw_thresh = p.get("low_stock_amount")
+                        thresh = int(raw_thresh) if raw_thresh is not None else 2
+                        item_summary = {
+                            "id": p.get("id"),
+                            "name": p.get("name"),
+                            "price": p.get("price"),
+                            "stock_quantity": qty,
+                        }
+
+                        if status == "outofstock" or (managed and qty is not None and qty <= 0):
+                            outofstock += 1
+                            outofstock_items.append(item_summary)
+                        elif managed and qty is not None and 0 < qty <= thresh:
+                            lowstock += 1
+                            lowstock_items.append(item_summary)
+                        elif status == "instock" or (managed and qty is not None and qty > thresh):
+                            instock += 1
+
+            if found_any:
+                totals["instock"] = instock
+                totals["lowstock"] = lowstock
+                totals["outofstock"] = outofstock
+                totals["lowstock_items"] = lowstock_items
+                totals["outofstock_items"] = outofstock_items
+                _LOGGER.debug(
+                    "Products stock calculated: total=%d, in=%d, low=%d, out=%d",
+                    totals["total"],
+                    instock,
+                    lowstock,
+                    outofstock,
+                )
                 return totals
         except WooCommerceApiError as err:
-            _LOGGER.debug("Could not fetch stock stats from wc-analytics: %s", err)
+            _LOGGER.debug("Could not calculate stock from products list: %s", err)
 
         # 4. Fallback: Query X-WP-Total for stock statuses
         try:
@@ -235,6 +291,20 @@ class WooCommerceApiClient:
             totals["instock"] = totals["total"]
 
         return totals
+
+    async def get_order(self, order_id: int | str) -> dict[str, Any]:
+        """Fetch details of a specific order."""
+        data = await self._request(f"orders/{order_id}")
+        if not isinstance(data, dict):
+            raise WooCommerceApiError(f"Unexpected response fetching order {order_id}")
+        return data
+
+    async def get_product(self, product_id: int | str) -> dict[str, Any]:
+        """Fetch details of a specific product."""
+        data = await self._request(f"products/{product_id}")
+        if not isinstance(data, dict):
+            raise WooCommerceApiError(f"Unexpected response fetching product {product_id}")
+        return data
 
     async def get_recent_orders(self, limit: int = 5) -> list[dict[str, Any]]:
         """Fetch recent orders with details."""

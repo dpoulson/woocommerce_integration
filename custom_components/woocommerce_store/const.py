@@ -19,3 +19,9 @@ PLATFORMS: Final = ["sensor"]
 
 # Services
 SERVICE_REFRESH: Final = "refresh"
+SERVICE_GET_ORDER: Final = "get_order"
+SERVICE_GET_PRODUCT: Final = "get_product"
+
+# Service parameters
+ATTR_ORDER_ID: Final = "order_id"
+ATTR_PRODUCT_ID: Final = "product_id"

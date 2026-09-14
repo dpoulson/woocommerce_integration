@@ -44,35 +44,34 @@ async def test_get_orders_totals():
 
 @pytest.mark.asyncio
 async def test_get_products_totals():
-    """Test get_products_totals sums product types and retrieves stock stats."""
+    """Test get_products_totals sums product types and inspects item stock."""
     session = MagicMock(spec=aiohttp.ClientSession)
     client = WooCommerceApiClient("https://example.com", "ck_123", "cs_456", session)
 
-    # Mock client._request for different endpoints
     async def mock_request(endpoint: str, params=None, namespace="wc/v3"):
         if endpoint == "reports/products/totals":
             return [
-                {"slug": "simple", "name": "Simple product", "total": 35},
-                {"slug": "variable", "name": "Variable product", "total": 10},
+                {"slug": "simple", "name": "Simple product", "total": 3},
+                {"slug": "variable", "name": "Variable product", "total": 1},
             ]
-        if endpoint == "reports/stock/stats" and namespace == "wc-analytics":
-            return {
-                "totals": {
-                    "products_low_stock": 3,
-                    "products_out_of_stock": 2,
-                }
-            }
+        if endpoint == "products":
+            return [
+                {"id": 1, "stock_status": "instock", "stock_quantity": 25, "manage_stock": True, "low_stock_amount": 5},
+                {"id": 2, "stock_status": "instock", "stock_quantity": 3, "manage_stock": True, "low_stock_amount": 5},
+                {"id": 3, "stock_status": "outofstock", "stock_quantity": 0, "manage_stock": True, "low_stock_amount": 2},
+                {"id": 4, "stock_status": "instock", "stock_quantity": None, "manage_stock": False, "low_stock_amount": None},
+            ]
         return {}
 
     client._request = AsyncMock(side_effect=mock_request)
 
     totals = await client.get_products_totals()
-    assert totals["total"] == 45
-    assert totals["simple"] == 35
-    assert totals["variable"] == 10
-    assert totals["lowstock"] == 3
-    assert totals["outofstock"] == 2
-    assert totals["instock"] == 43
+    assert totals["total"] == 4
+    assert totals["simple"] == 3
+    assert totals["variable"] == 1
+    assert totals["instock"] == 2
+    assert totals["lowstock"] == 1
+    assert totals["outofstock"] == 1
 
 
 @pytest.mark.asyncio
@@ -156,3 +155,23 @@ async def test_fetch_all_data():
     assert data.products_totals == {"total": 20}
     assert len(data.recent_orders) == 1
     assert data.sales_today == {"total_sales": "150.00"}
+
+
+@pytest.mark.asyncio
+async def test_get_order_and_product():
+    """Test get_order and get_product API queries."""
+    session = MagicMock(spec=aiohttp.ClientSession)
+    client = WooCommerceApiClient("https://example.com", "ck_1", "cs_1", session)
+
+    client._request = AsyncMock(
+        side_effect=lambda ep: {"id": 100, "status": "processing"} if "orders" in ep else {"id": 20, "name": "Shirt"}
+    )
+
+    order = await client.get_order(100)
+    assert order["id"] == 100
+    assert order["status"] == "processing"
+
+    product = await client.get_product(20)
+    assert product["id"] == 20
+    assert product["name"] == "Shirt"
+

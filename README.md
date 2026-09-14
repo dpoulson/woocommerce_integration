@@ -106,6 +106,24 @@ Trigger an immediate data fetch from the WooCommerce REST API.
 service: woocommerce_store.refresh
 ```
 
+### `woocommerce_store.get_order`
+Fetch real-time details for a specific order on demand (supports response data).
+```yaml
+service: woocommerce_store.get_order
+data:
+  order_id: 1024
+response_variable: order_details
+```
+
+### `woocommerce_store.get_product`
+Fetch real-time stock and pricing for a specific product on demand.
+```yaml
+service: woocommerce_store.get_product
+data:
+  product_id: 45
+response_variable: product_details
+```
+
 ---
 
 ## Example Automation: New Order Notification
