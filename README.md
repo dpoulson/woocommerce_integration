@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.png" alt="WooCommerce Store for Home Assistant" width="160">
+</p>
+
 # Home Assistant WooCommerce Store Integration
 
 A modern, read-only Home Assistant custom component that interfaces with the WooCommerce REST API (v3) to monitor store performance, order flow, inventory levels, and sales in real-time.
