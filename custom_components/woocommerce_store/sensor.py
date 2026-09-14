@@ -104,6 +104,11 @@ PRODUCT_SENSORS: tuple[WooCommerceSensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="products",
         value_fn=lambda data: data.products_totals.get("total", 0),
+        attrs_fn=lambda data: {
+            f"type_{k}": v
+            for k, v in data.products_totals.items()
+            if k not in ("total", "instock", "lowstock", "outofstock")
+        },
     ),
     WooCommerceSensorEntityDescription(
         key="products_instock",

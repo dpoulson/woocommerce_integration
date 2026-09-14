@@ -64,21 +64,22 @@ class WooCommerceApiClient:
         """Return base URL."""
         return self._base_url
 
-    def _get_url(self, endpoint: str) -> str:
+    def _get_url(self, endpoint: str, namespace: str = "wc/v3") -> str:
         """Construct endpoint URL."""
         endpoint = endpoint.lstrip("/")
-        return f"{self._base_url}/wp-json/wc/v3/{endpoint}"
+        return f"{self._base_url}/wp-json/{namespace}/{endpoint}"
 
-    async def _request(
+    def _prepare_request(
         self,
         endpoint: str,
         params: dict[str, Any] | None = None,
-    ) -> Any:
-        """Execute an asynchronous HTTP GET request."""
-        url = self._get_url(endpoint)
+        namespace: str = "wc/v3",
+    ) -> tuple[str, dict[str, Any], dict[str, str]]:
+        """Prepare URL, params, and headers."""
+        url = self._get_url(endpoint, namespace=namespace)
         request_params = dict(params) if params else {}
-
         headers: dict[str, str] = {}
+
         if self._is_https:
             credentials = f"{self._consumer_key}:{self._consumer_secret}"
             encoded = base64.b64encode(credentials.encode()).decode("ascii")
@@ -86,6 +87,19 @@ class WooCommerceApiClient:
         else:
             request_params["consumer_key"] = self._consumer_key
             request_params["consumer_secret"] = self._consumer_secret
+
+        return url, request_params, headers
+
+    async def _request(
+        self,
+        endpoint: str,
+        params: dict[str, Any] | None = None,
+        namespace: str = "wc/v3",
+    ) -> Any:
+        """Execute an asynchronous HTTP GET request."""
+        url, request_params, headers = self._prepare_request(
+            endpoint, params=params, namespace=namespace
+        )
 
         try:
             async with self._session.get(
@@ -111,6 +125,33 @@ class WooCommerceApiClient:
         except Exception as err:
             raise WooCommerceApiError(f"Unexpected error communicating with WooCommerce: {err}") from err
 
+    async def _get_headers(
+        self,
+        endpoint: str,
+        params: dict[str, Any] | None = None,
+        namespace: str = "wc/v3",
+    ) -> dict[str, str]:
+        """Execute request and return lowercased response headers."""
+        url, request_params, headers = self._prepare_request(
+            endpoint, params=params, namespace=namespace
+        )
+
+        try:
+            async with self._session.get(
+                url,
+                params=request_params,
+                headers=headers,
+                ssl=self._verify_ssl,
+                timeout=aiohttp.ClientTimeout(total=self._timeout),
+            ) as response:
+                if response.status in (401, 403):
+                    raise WooCommerceAuthError(f"Authentication failed ({response.status})")
+                if response.status >= 400:
+                    raise WooCommerceApiError(f"API request failed with HTTP status {response.status}")
+                return {k.lower(): v for k, v in response.headers.items()}
+        except (aiohttp.ClientConnectorError, aiohttp.ServerTimeoutError, asyncio.TimeoutError) as err:
+            raise WooCommerceConnectionError(f"Connection to WooCommerce failed: {err}") from err
+
     async def test_connection(self) -> bool:
         """Test API connection and credentials."""
         # Use reports/orders/totals or system_status to verify read permissions
@@ -131,14 +172,68 @@ class WooCommerceApiClient:
 
     async def get_products_totals(self) -> dict[str, int]:
         """Fetch product count metrics."""
-        data = await self._request("reports/products/totals")
-        totals: dict[str, int] = {}
-        if isinstance(data, list):
-            for item in data:
-                slug = item.get("slug")
-                total = item.get("total", 0)
-                if slug:
-                    totals[slug] = int(total)
+        totals: dict[str, int] = {
+            "total": 0,
+            "instock": 0,
+            "lowstock": 0,
+            "outofstock": 0,
+        }
+
+        # 1. Fetch products totals by type (simple, variable, etc.) and calculate total count
+        try:
+            data = await self._request("reports/products/totals")
+            if isinstance(data, list):
+                type_sum = 0
+                for item in data:
+                    slug = item.get("slug")
+                    count = int(item.get("total", 0))
+                    if slug:
+                        totals[slug] = count
+                    type_sum += count
+                totals["total"] = type_sum
+        except WooCommerceApiError as err:
+            _LOGGER.debug("Could not fetch reports/products/totals: %s", err)
+
+        # 2. If total is still 0, try X-WP-Total header from /wc/v3/products
+        if totals["total"] == 0:
+            try:
+                headers = await self._get_headers("products", params={"per_page": 1})
+                if "x-wp-total" in headers:
+                    totals["total"] = int(headers["x-wp-total"])
+            except WooCommerceApiError as err:
+                _LOGGER.debug("Could not fetch products total via header: %s", err)
+
+        # 3. Try wc-analytics stock stats (provides low stock & out of stock)
+        try:
+            stock_data = await self._request("reports/stock/stats", namespace="wc-analytics")
+            if isinstance(stock_data, dict) and "totals" in stock_data:
+                analytics_totals = stock_data["totals"]
+                totals["lowstock"] = int(analytics_totals.get("products_low_stock", 0))
+                totals["outofstock"] = int(analytics_totals.get("products_out_of_stock", 0))
+                totals["instock"] = max(0, totals["total"] - totals["outofstock"])
+                return totals
+        except WooCommerceApiError as err:
+            _LOGGER.debug("Could not fetch stock stats from wc-analytics: %s", err)
+
+        # 4. Fallback: Query X-WP-Total for stock statuses
+        try:
+            headers_out = await self._get_headers(
+                "products", params={"per_page": 1, "stock_status": "outofstock"}
+            )
+            if "x-wp-total" in headers_out:
+                totals["outofstock"] = int(headers_out["x-wp-total"])
+
+            headers_in = await self._get_headers(
+                "products", params={"per_page": 1, "stock_status": "instock"}
+            )
+            if "x-wp-total" in headers_in:
+                totals["instock"] = int(headers_in["x-wp-total"])
+            else:
+                totals["instock"] = max(0, totals["total"] - totals["outofstock"])
+        except WooCommerceApiError as err:
+            _LOGGER.debug("Could not fetch stock totals via headers: %s", err)
+            totals["instock"] = totals["total"]
+
         return totals
 
     async def get_recent_orders(self, limit: int = 5) -> list[dict[str, Any]]:
