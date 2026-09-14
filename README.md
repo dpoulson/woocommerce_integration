@@ -4,6 +4,8 @@
 
 # Home Assistant WooCommerce Store Integration
 
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=dpoulson&repository=woocommerce_integration&category=integration)
+
 A modern, read-only Home Assistant custom component that interfaces with the WooCommerce REST API (v3) to monitor store performance, order flow, inventory levels, and sales in real-time.
 
 ---
@@ -26,12 +28,16 @@ A modern, read-only Home Assistant custom component that interfaces with the Woo
 ## Installation
 
 ### Method 1: Via HACS (Recommended)
-1. Ensure [HACS](https://hacs.xyz/) is installed in Home Assistant.
-2. In Home Assistant, open **HACS** &rarr; **Integrations**.
-3. Click the three dots (top right) &rarr; **Custom repositories**.
-4. Add your GitHub repository URL (e.g., `https://github.com/yourusername/woocommerce_integration`), set category to **Integration**, and click **Add**.
-5. Find **WooCommerce Store** in HACS and click **Download**.
-6. Restart Home Assistant.
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=dpoulson&repository=woocommerce_integration&category=integration)
+
+1. Click the button above to add this repository directly to HACS.
+2. Click **Download**, then restart Home Assistant.
+
+*Manual HACS steps if needed:*
+1. Open **HACS** &rarr; **Integrations** &rarr; **Custom repositories** (three dots menu).
+2. Add `https://github.com/dpoulson/woocommerce_integration` as category **Integration**.
+3. Search for **WooCommerce Store** &rarr; **Download** &rarr; Restart Home Assistant.
 
 ### Method 2: Manual Installation
 1. Copy the `custom_components/woocommerce_store` directory into your Home Assistant `<config>/custom_components/` directory.
