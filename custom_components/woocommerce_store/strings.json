@@ -5,7 +5,7 @@
         "title": "Connect to WooCommerce",
         "description": "Enter your WooCommerce store details and REST API credentials (with Read permissions).",
         "data": {
-          "url": "Store URL (e.g. https://mystore.com)",
+          "url": "Store URL",
           "consumer_key": "Consumer Key (ck_...)",
           "consumer_secret": "Consumer Secret (cs_...)",
           "verify_ssl": "Verify SSL Certificate"
