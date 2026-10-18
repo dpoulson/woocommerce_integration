@@ -160,7 +160,7 @@ action:
 
 ## Lovelace Dashboard
 
-A pre-built, responsive Home Assistant dashboard view is provided in [`examples/dashboard.yaml`](file:///home/daz/Source/woocommerce_integration/examples/dashboard.yaml).
+A pre-built, responsive Home Assistant dashboard view is provided in [`examples/dashboard.yaml`](examples/dashboard.yaml).
 
 Features included:
 - **KPI Metrics Cards**: Orders Processing, Total Orders, Sales Today, In-Stock Products.
@@ -169,7 +169,7 @@ Features included:
 - **Latest Order Card**: Real-time display of recent customer details, amounts, and dates.
 - **Controls & Actions**: Quick buttons to refresh store data on demand, test the ESP32 fireworks animation, and toggle display backlight.
 
-To use: Create a new Lovelace dashboard or view in Home Assistant, open the **Raw configuration editor**, and paste the contents of [`examples/dashboard.yaml`](file:///home/daz/Source/woocommerce_integration/examples/dashboard.yaml).
+To use: Create a new Lovelace dashboard or view in Home Assistant, open the **Raw configuration editor**, and paste the contents of [`examples/dashboard.yaml`](examples/dashboard.yaml).
 
 ---
 
@@ -187,5 +187,5 @@ This repository includes full ESPHome firmware for a companion desktop display u
 - **Touch-to-Refresh**: Tap anywhere on the screen to trigger an immediate Home Assistant data update.
 - **Celebratory Fireworks**: Full-screen starburst animation on new orders.
 
-See the [ESPHome Display Documentation](file:///home/daz/Source/woocommerce_integration/esphome/README.md) for pinout tables, configuration guides, and flashing instructions.
+See the [ESPHome Display Documentation](esphome/README.md) for pinout tables, configuration guides, and flashing instructions.
 

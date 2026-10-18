@@ -29,6 +29,19 @@ class WooCommerceSensorEntityDescription(SensorEntityDescription):
     attrs_fn: Callable[[WooCommerceData], dict[str, Any]] | None = None
 
 
+def _extract_orders_processing_attrs(data: WooCommerceData) -> dict[str, Any]:
+    """Extract attributes for processing orders sensor."""
+    return {
+        "pending_units_by_product": {
+            pid: {
+                "name": data.products_sales.get(pid, {}).get("name", f"Product {pid}"),
+                "quantity": qty,
+            }
+            for pid, qty in data.pending_units_by_product.items()
+        }
+    }
+
+
 ORDER_STATUS_SENSORS: tuple[WooCommerceSensorEntityDescription, ...] = (
     WooCommerceSensorEntityDescription(
         key="total_orders",
@@ -45,6 +58,7 @@ ORDER_STATUS_SENSORS: tuple[WooCommerceSensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="orders",
         value_fn=lambda data: data.orders_totals.get("processing", 0),
+        attrs_fn=_extract_orders_processing_attrs,
     ),
     WooCommerceSensorEntityDescription(
         key="orders_pending",
@@ -211,12 +225,45 @@ async def async_setup_entry(
         SALES_TODAY_SENSOR,
     ]
 
-    entities = [
+    entities: list[SensorEntity] = [
         WooCommerceSensor(coordinator, entry, description)
         for description in descriptions
     ]
 
+    known_product_ids: set[int] = set()
+
+    if coordinator.data and coordinator.data.products_sales:
+        for pid in coordinator.data.products_sales:
+            known_product_ids.add(pid)
+            entities.append(
+                WooCommerceProductSensor(coordinator, entry, pid, "pending_units")
+            )
+            entities.append(
+                WooCommerceProductSensor(coordinator, entry, pid, "total_sales")
+            )
+
     async_add_entities(entities)
+
+    def _add_new_product_entities() -> None:
+        if not coordinator.data or not coordinator.data.products_sales:
+            return
+        new_entities: list[SensorEntity] = []
+        for pid in coordinator.data.products_sales:
+            if pid not in known_product_ids:
+                known_product_ids.add(pid)
+                new_entities.append(
+                    WooCommerceProductSensor(coordinator, entry, pid, "pending_units")
+                )
+                new_entities.append(
+                    WooCommerceProductSensor(coordinator, entry, pid, "total_sales")
+                )
+        if new_entities:
+            async_add_entities(new_entities)
+
+    if hasattr(entry, "async_on_unload"):
+        entry.async_on_unload(coordinator.async_add_listener(_add_new_product_entities))
+    else:
+        coordinator.async_add_listener(_add_new_product_entities)
 
 
 class WooCommerceSensor(CoordinatorEntity[WooCommerceDataUpdateCoordinator], SensorEntity):
@@ -256,3 +303,87 @@ class WooCommerceSensor(CoordinatorEntity[WooCommerceDataUpdateCoordinator], Sen
         if self.coordinator.data is None or not self.entity_description.attrs_fn:
             return None
         return self.entity_description.attrs_fn(self.coordinator.data)
+
+
+class WooCommerceProductSensor(
+    CoordinatorEntity[WooCommerceDataUpdateCoordinator], SensorEntity
+):
+    """Representation of a per-product WooCommerce sensor."""
+
+    def __init__(
+        self,
+        coordinator: WooCommerceDataUpdateCoordinator,
+        entry: ConfigEntry,
+        product_id: int,
+        sensor_type: str,
+    ) -> None:
+        """Initialize the product sensor."""
+        super().__init__(coordinator)
+        self.product_id = product_id
+        self.sensor_type = sensor_type
+
+        product = (
+            coordinator.data.products_sales.get(product_id, {})
+            if coordinator.data
+            else {}
+        )
+        product_name = product.get("name") or f"Product {product_id}"
+        product_slug = product.get("slug") or f"product_{product_id}"
+        safe_slug = product_slug.replace("-", "_").lower()
+
+        if sensor_type == "pending_units":
+            self.entity_description = SensorEntityDescription(
+                key=f"{safe_slug}_pending_units",
+                name=f"{product_name} Pending Units",
+                icon="mdi:clipboard-clock",
+                native_unit_of_measurement="units",
+                state_class=SensorStateClass.MEASUREMENT,
+            )
+            self._attr_unique_id = f"{entry.entry_id}_{product_id}_pending_units"
+        else:
+            self.entity_description = SensorEntityDescription(
+                key=f"{safe_slug}_total_sales",
+                name=f"{product_name} Total Sales",
+                icon="mdi:chart-line",
+                native_unit_of_measurement="units",
+                state_class=SensorStateClass.TOTAL,
+            )
+            self._attr_unique_id = f"{entry.entry_id}_{product_id}_total_sales"
+
+        self._attr_suggested_object_id = f"{safe_slug}_{sensor_type}"
+        self._attr_has_entity_name = True
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=entry.title,
+            manufacturer="WooCommerce",
+            model="REST API v3",
+            configuration_url=coordinator.client.base_url,
+        )
+
+    @property
+    def native_value(self) -> int | None:
+        """Return native value from coordinator data."""
+        if not self.coordinator.data:
+            return None
+        if self.sensor_type == "pending_units":
+            return self.coordinator.data.pending_units_by_product.get(
+                self.product_id, 0
+            )
+        product = self.coordinator.data.products_sales.get(self.product_id, {})
+        return product.get("total_sales", 0)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return entity specific state attributes."""
+        if not self.coordinator.data:
+            return None
+        product = self.coordinator.data.products_sales.get(self.product_id, {})
+        attrs: dict[str, Any] = {
+            "product_id": self.product_id,
+            "product_name": product.get("name"),
+            "slug": product.get("slug"),
+            "stock_quantity": product.get("stock_quantity"),
+        }
+        if self.sensor_type == "total_sales":
+            attrs["price"] = product.get("price")
+        return attrs

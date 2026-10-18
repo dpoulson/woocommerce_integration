@@ -44,7 +44,7 @@ async def test_get_orders_totals():
 
 @pytest.mark.asyncio
 async def test_get_products_totals():
-    """Test get_products_totals sums product types and inspects item stock."""
+    """Test get_products_totals sums product types and inspects item stock and sales."""
     session = MagicMock(spec=aiohttp.ClientSession)
     client = WooCommerceApiClient("https://example.com", "ck_123", "cs_456", session)
 
@@ -56,10 +56,50 @@ async def test_get_products_totals():
             ]
         if endpoint == "products":
             return [
-                {"id": 1, "stock_status": "instock", "stock_quantity": 25, "manage_stock": True, "low_stock_amount": 5},
-                {"id": 2, "stock_status": "instock", "stock_quantity": 3, "manage_stock": True, "low_stock_amount": 5},
-                {"id": 3, "stock_status": "outofstock", "stock_quantity": 0, "manage_stock": True, "low_stock_amount": 2},
-                {"id": 4, "stock_status": "instock", "stock_quantity": None, "manage_stock": False, "low_stock_amount": None},
+                {
+                    "id": 1,
+                    "name": "Widget A",
+                    "slug": "widget-a",
+                    "stock_status": "instock",
+                    "stock_quantity": 25,
+                    "manage_stock": True,
+                    "low_stock_amount": 5,
+                    "price": "19.99",
+                    "total_sales": 10,
+                },
+                {
+                    "id": 2,
+                    "name": "Widget B",
+                    "slug": "widget-b",
+                    "stock_status": "instock",
+                    "stock_quantity": 3,
+                    "manage_stock": True,
+                    "low_stock_amount": 5,
+                    "price": "29.99",
+                    "total_sales": "5",
+                },
+                {
+                    "id": 3,
+                    "name": "Widget C",
+                    "slug": "widget-c",
+                    "stock_status": "outofstock",
+                    "stock_quantity": 0,
+                    "manage_stock": True,
+                    "low_stock_amount": 2,
+                    "price": "9.99",
+                    "total_sales": 0,
+                },
+                {
+                    "id": 4,
+                    "name": "Widget D",
+                    "slug": "widget-d",
+                    "stock_status": "instock",
+                    "stock_quantity": None,
+                    "manage_stock": False,
+                    "low_stock_amount": None,
+                    "price": "49.99",
+                    "total_sales": None,
+                },
             ]
         return {}
 
@@ -72,6 +112,17 @@ async def test_get_products_totals():
     assert totals["instock"] == 2
     assert totals["lowstock"] == 1
     assert totals["outofstock"] == 1
+    assert totals["products_sales"][1] == {
+        "id": 1,
+        "name": "Widget A",
+        "slug": "widget-a",
+        "total_sales": 10,
+        "stock_quantity": 25,
+        "price": "19.99",
+    }
+    assert totals["products_sales"][2]["total_sales"] == 5
+    assert totals["products_sales"][3]["total_sales"] == 0
+    assert totals["products_sales"][4]["total_sales"] == 0
 
 
 @pytest.mark.asyncio
@@ -140,21 +191,79 @@ async def test_connection_error_handling():
 
 
 @pytest.mark.asyncio
+async def test_get_open_orders_by_product():
+    """Test get_open_orders_by_product aggregates line-item quantities across multi-item orders."""
+    session = MagicMock(spec=aiohttp.ClientSession)
+    client = WooCommerceApiClient("https://example.com", "ck_123", "cs_456", session)
+
+    mock_orders = [
+        {
+            "id": 101,
+            "status": "processing",
+            "line_items": [
+                {"product_id": 180, "name": "Astropixels Kit", "quantity": 2},
+                {"product_id": 185, "name": "Cable Pack", "quantity": 1},
+            ],
+        },
+        {
+            "id": 102,
+            "status": "pending",
+            "line_items": [
+                {"product_id": 180, "name": "Astropixels Kit", "quantity": 3},
+                {"product_id": 190, "name": "Power Supply", "quantity": 4},
+                {"product_id": 180, "name": "Astropixels Kit", "quantity": 1},
+            ],
+        },
+    ]
+
+    client._request = AsyncMock(return_value=mock_orders)
+
+    pending_units = await client.get_open_orders_by_product()
+
+    client._request.assert_awaited_once_with(
+        "orders",
+        params={"status": "processing,pending", "per_page": 100},
+    )
+    assert pending_units == {
+        180: 6,  # 2 + 3 + 1
+        185: 1,
+        190: 4,
+    }
+
+
+@pytest.mark.asyncio
 async def test_fetch_all_data():
     """Test parallel fetch of all data sets."""
     session = MagicMock(spec=aiohttp.ClientSession)
     client = WooCommerceApiClient("https://example.com", "ck_1", "cs_1", session)
 
     client.get_orders_totals = AsyncMock(return_value={"processing": 3, "completed": 10})
-    client.get_products_totals = AsyncMock(return_value={"total": 20})
+    client.get_products_totals = AsyncMock(
+        return_value={
+            "total": 20,
+            "products_sales": {
+                180: {
+                    "id": 180,
+                    "name": "Astropixels Kit",
+                    "slug": "astropixels-kit",
+                    "total_sales": 42,
+                    "stock_quantity": 15,
+                    "price": "99.00",
+                }
+            },
+        }
+    )
     client.get_recent_orders = AsyncMock(return_value=[{"id": 1, "number": "1"}])
     client.get_sales_report = AsyncMock(return_value={"total_sales": "150.00"})
+    client.get_open_orders_by_product = AsyncMock(return_value={180: 6})
 
     data = await client.fetch_all_data()
     assert data.orders_totals == {"processing": 3, "completed": 10}
-    assert data.products_totals == {"total": 20}
+    assert data.products_totals["total"] == 20
     assert len(data.recent_orders) == 1
     assert data.sales_today == {"total_sales": "150.00"}
+    assert data.products_sales[180]["total_sales"] == 42
+    assert data.pending_units_by_product == {180: 6}
 
 
 @pytest.mark.asyncio

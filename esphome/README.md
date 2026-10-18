@@ -7,11 +7,32 @@ A companion round desktop display for your WooCommerce store built with ESPHome 
 </p>
 
 ## Supported Hardware
+
+### 1. GeekMagic SmallTV / SmallTV Ultra (Square Desktop Display)
+- **File**: [`woocommerce_display_geekmagic.yaml`](woocommerce_display_geekmagic.yaml)
+- **Board**: **GeekMagic SmallTV / Ultra** (ESP8266 / ESP-12F / `esp12e`)
+- **Panel**: 1.54" IPS Square TFT (240x240, ST7789V driver)
+- **Button**: Top push button (`GPIO4` with internal pull-up)
+
+#### Pinout Mapping (GeekMagic SmallTV ESP8266)
+| Component | Function | GPIO Pin | Notes |
+|---|---|---|---|
+| **LCD** | SCLK (Clock) | `GPIO14` | Hardware SPI CLK |
+| **LCD** | MOSI (Data) | `GPIO13` | Hardware SPI MOSI |
+| **LCD** | DC (Data/Command) | `GPIO0` | Data / Command Selection |
+| **LCD** | RST (Reset) | `GPIO2` | Hardware Reset |
+| **Backlight** | BL (PWM) | `GPIO5` | Inverted PWM (`esp8266_pwm`) |
+| **Button** | Top Button | `GPIO4` | Active-low button |
+
+---
+
+### 2. Waveshare / Spotpear Round Display
+- **File**: [`woocommerce_display.yaml`](woocommerce_display.yaml)
 - **Board**: **Waveshare / Spotpear ESP32-S3-Touch-LCD-1.28** (ESP32-S3 with 2MB PSRAM)
 - **Panel**: 1.28" Round IPS LCD (240x240, GC9A01 driver)
-- **Touch**: Capacitive Touch Controller (CST816 via I2C)
+- **Touch**: Full circular capacitive touchscreen (CST816 via I2C)
 
-### Pinout Mapping
+#### Pinout Mapping (Waveshare 1.28" Round)
 | Component | Function | GPIO Pin | Notes |
 |---|---|---|---|
 | **LCD** | SCLK (Clock) | `GPIO10` | Hardware SPI (`SPI2_HOST`) |
@@ -62,7 +83,7 @@ ap_fallback_password: "Your_AP_Fallback_Password"
 ```
 
 ### 2. Configure Sensor Entity Substitutions
-Open `esphome/woocommerce_display.yaml` and adjust the substitution lines at the top to match your WooCommerce Store entity IDs in Home Assistant:
+Open either [`woocommerce_display_geekmagic.yaml`](woocommerce_display_geekmagic.yaml) (GeekMagic SmallTV) or [`woocommerce_display.yaml`](woocommerce_display.yaml) (Round Waveshare Display) and adjust the substitutions at the top:
 ```yaml
 substitutions:
   device_name: "woocommerce-display"
@@ -74,15 +95,21 @@ substitutions:
 
 ### 3. Flash the Device
 
-#### Initial Flash (via USB):
-Connect the board via USB (detected as `/dev/ttyACM0` or `COMx` on Windows):
+#### For GeekMagic SmallTV Pro:
 ```bash
-esphome run esphome/woocommerce_display.yaml --device /dev/ttyACM0
+# Via USB:
+esphome run esphome/woocommerce_display_geekmagic.yaml --device /dev/ttyUSB0
+
+# Wirelessly (OTA):
+esphome run esphome/woocommerce_display_geekmagic.yaml --device <device_ip_or_hostname>
 ```
 
-#### Wireless Updates (OTA):
-Once connected to your Wi-Fi network, flash future updates wirelessly:
+#### For Waveshare Round Display:
 ```bash
+# Via USB:
+esphome run esphome/woocommerce_display.yaml --device /dev/ttyACM0
+
+# Wirelessly (OTA):
 esphome run esphome/woocommerce_display.yaml --device <device_ip_or_hostname>
 ```
 

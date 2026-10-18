@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import aiohttp
@@ -32,6 +32,8 @@ class WooCommerceData:
     products_totals: dict[str, Any]
     recent_orders: list[dict[str, Any]]
     sales_today: dict[str, Any] | None = None
+    products_sales: dict[int, dict[str, Any]] = field(default_factory=dict)
+    pending_units_by_product: dict[int, int] = field(default_factory=dict)
 
 
 class WooCommerceApiClient:
@@ -179,6 +181,7 @@ class WooCommerceApiClient:
             "outofstock": 0,
             "lowstock_items": [],
             "outofstock_items": [],
+            "products_sales": {},
         }
 
         # 1. Fetch products totals by type (simple, variable, etc.) and calculate total count
@@ -215,7 +218,7 @@ class WooCommerceApiClient:
                         "per_page": 100,
                         "page": page,
                         "status": "publish",
-                        "_fields": "id,name,price,manage_stock,stock_quantity,stock_status,low_stock_amount",
+                        "_fields": "id,name,slug,price,manage_stock,stock_quantity,stock_status,low_stock_amount,total_sales",
                     },
                 )
                 for page in range(1, pages_to_fetch + 1)
@@ -227,6 +230,7 @@ class WooCommerceApiClient:
             outofstock = 0
             lowstock_items: list[dict[str, Any]] = []
             outofstock_items: list[dict[str, Any]] = []
+            products_sales: dict[int, dict[str, Any]] = {}
             found_any = False
 
             for res in pages_results:
@@ -254,12 +258,30 @@ class WooCommerceApiClient:
                         elif status == "instock" or (managed and qty is not None and qty > thresh):
                             instock += 1
 
+                        pid = p.get("id")
+                        if pid is not None:
+                            try:
+                                pid_int = int(pid)
+                                raw_sales = p.get("total_sales", 0)
+                                total_sales = int(raw_sales) if raw_sales is not None else 0
+                                products_sales[pid_int] = {
+                                    "id": pid_int,
+                                    "name": p.get("name", f"Product {pid_int}"),
+                                    "slug": p.get("slug", f"product_{pid_int}"),
+                                    "total_sales": total_sales,
+                                    "stock_quantity": qty,
+                                    "price": p.get("price"),
+                                }
+                            except (ValueError, TypeError):
+                                pass
+
             if found_any:
                 totals["instock"] = instock
                 totals["lowstock"] = lowstock
                 totals["outofstock"] = outofstock
                 totals["lowstock_items"] = lowstock_items
                 totals["outofstock_items"] = outofstock_items
+                totals["products_sales"] = products_sales
                 _LOGGER.debug(
                     "Products stock calculated: total=%d, in=%d, low=%d, out=%d",
                     totals["total"],
@@ -353,13 +375,50 @@ class WooCommerceApiClient:
             _LOGGER.debug("Could not fetch sales report: %s", err)
         return None
 
+    async def get_open_orders_by_product(self) -> dict[int, int]:
+        """Fetch processing and pending orders and sum line item quantities by product_id."""
+        try:
+            data = await self._request(
+                "orders",
+                params={"status": "processing,pending", "per_page": 100},
+            )
+            if not isinstance(data, list):
+                return {}
+
+            pending_units: dict[int, int] = {}
+            for order in data:
+                if not isinstance(order, dict):
+                    continue
+                for item in order.get("line_items", []):
+                    if not isinstance(item, dict):
+                        continue
+                    product_id = item.get("product_id")
+                    if product_id is not None:
+                        try:
+                            pid = int(product_id)
+                            qty = int(item.get("quantity", 0) or 0)
+                            pending_units[pid] = pending_units.get(pid, 0) + qty
+                        except (ValueError, TypeError):
+                            continue
+            return pending_units
+        except WooCommerceApiError as err:
+            _LOGGER.debug("Could not fetch open orders by product: %s", err)
+            return {}
+
     async def fetch_all_data(self) -> WooCommerceData:
         """Fetch all store data in parallel."""
-        orders_totals, products_totals, recent_orders, sales_today = await asyncio.gather(
+        (
+            orders_totals,
+            products_totals,
+            recent_orders,
+            sales_today,
+            pending_units_by_product,
+        ) = await asyncio.gather(
             self.get_orders_totals(),
             self.get_products_totals(),
             self.get_recent_orders(limit=5),
             self.get_sales_report(period="today"),
+            self.get_open_orders_by_product(),
             return_exceptions=False,
         )
         return WooCommerceData(
@@ -367,4 +426,6 @@ class WooCommerceApiClient:
             products_totals=products_totals,
             recent_orders=recent_orders,
             sales_today=sales_today,
+            products_sales=products_totals.get("products_sales", {}),
+            pending_units_by_product=pending_units_by_product,
         )
