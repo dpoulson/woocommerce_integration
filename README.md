@@ -5,6 +5,7 @@
 # Home Assistant WooCommerce Store Integration
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=dpoulson&repository=woocommerce_integration&category=integration)
+[![Donate via PayPal](https://img.shields.io/badge/Donate-PayPal-00457C?logo=paypal&logoColor=white)](https://www.paypal.com/paypalme/wemakethingsco)
 
 A modern, read-only Home Assistant custom component that interfaces with the WooCommerce REST API (v3) to monitor store performance, order flow, inventory levels, and sales in real-time.
 
@@ -188,4 +189,13 @@ This repository includes full ESPHome firmware for a companion desktop display u
 - **Celebratory Fireworks**: Full-screen starburst animation on new orders.
 
 See the [ESPHome Display Documentation](esphome/README.md) for pinout tables, configuration guides, and flashing instructions.
+
+---
+
+## Support & Donations
+
+If you find this integration useful and want to support ongoing maintenance and feature development, donations are gratefully received:
+
+[![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-00457C?style=for-the-badge&logo=paypal&logoColor=white)](https://www.paypal.com/paypalme/wemakethingsco)
+
 
