@@ -7,7 +7,13 @@ from datetime import timedelta
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import WooCommerceApiClient, WooCommerceApiError, WooCommerceData
+from .api import (
+    WooCommerceApiClient,
+    WooCommerceApiError,
+    WooCommerceAuthError,
+    WooCommerceData,
+    WooCommerceRateLimitError,
+)
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,5 +41,17 @@ class WooCommerceDataUpdateCoordinator(DataUpdateCoordinator[WooCommerceData]):
         """Fetch data from WooCommerce."""
         try:
             return await self.client.fetch_all_data()
+        except WooCommerceRateLimitError as err:
+            _LOGGER.warning(
+                "WooCommerce rate limit exceeded: %s. Coordinator will retry on next polling cycle",
+                err,
+            )
+            raise UpdateFailed(f"Rate limited by WooCommerce API: {err}") from err
+        except WooCommerceAuthError as err:
+            _LOGGER.error(
+                "WooCommerce authentication failed: %s. Check API keys to prevent hosting IP block",
+                err,
+            )
+            raise UpdateFailed(f"WooCommerce authentication failed: {err}") from err
         except WooCommerceApiError as err:
             raise UpdateFailed(f"Error communicating with WooCommerce API: {err}") from err

@@ -24,6 +24,15 @@ class WooCommerceConnectionError(WooCommerceApiError):
     """Network connection or timeout error."""
 
 
+class WooCommerceRateLimitError(WooCommerceApiError):
+    """Rate limit exceeded error (HTTP 429)."""
+
+    def __init__(self, message: str, retry_after: int | None = None) -> None:
+        """Initialize rate limit error."""
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
 @dataclass
 class WooCommerceData:
     """Consolidated store data."""
@@ -47,6 +56,7 @@ class WooCommerceApiClient:
         session: aiohttp.ClientSession,
         verify_ssl: bool = True,
         timeout: int = 15,
+        request_delay: float = 0.25,
     ) -> None:
         """Initialize the API client."""
         clean_url = url.strip().rstrip("/")
@@ -60,11 +70,30 @@ class WooCommerceApiClient:
         self._verify_ssl = verify_ssl
         self._timeout = timeout
         self._is_https = clean_url.startswith("https://")
+        self._request_delay = request_delay
+        self._rate_lock: asyncio.Lock | None = None
+        self._last_request_time: float = 0.0
 
     @property
     def base_url(self) -> str:
         """Return base URL."""
         return self._base_url
+
+    def _get_rate_lock(self) -> asyncio.Lock:
+        """Get or create the rate limit lock for the active event loop."""
+        if self._rate_lock is None:
+            self._rate_lock = asyncio.Lock()
+        return self._rate_lock
+
+    async def _throttle(self) -> None:
+        """Enforce minimum delay between consecutive requests to prevent DoS/WAF triggers."""
+        if self._request_delay <= 0:
+            return
+        now = asyncio.get_running_loop().time()
+        elapsed = now - self._last_request_time
+        if elapsed < self._request_delay:
+            await asyncio.sleep(self._request_delay - elapsed)
+        self._last_request_time = asyncio.get_running_loop().time()
 
     def _get_url(self, endpoint: str, namespace: str = "wc/v3") -> str:
         """Construct endpoint URL."""
@@ -80,7 +109,10 @@ class WooCommerceApiClient:
         """Prepare URL, params, and headers."""
         url = self._get_url(endpoint, namespace=namespace)
         request_params = dict(params) if params else {}
-        headers: dict[str, str] = {}
+        headers: dict[str, str] = {
+            "Accept": "application/json",
+            "User-Agent": "HomeAssistant-WooCommerceStore/1.0 (+https://www.home-assistant.io)",
+        }
 
         if self._is_https:
             credentials = f"{self._consumer_key}:{self._consumer_secret}"
@@ -98,34 +130,52 @@ class WooCommerceApiClient:
         params: dict[str, Any] | None = None,
         namespace: str = "wc/v3",
     ) -> Any:
-        """Execute an asynchronous HTTP GET request."""
+        """Execute an asynchronous HTTP GET request with serialized rate-limiting."""
         url, request_params, headers = self._prepare_request(
             endpoint, params=params, namespace=namespace
         )
 
-        try:
-            async with self._session.get(
-                url,
-                params=request_params,
-                headers=headers,
-                ssl=self._verify_ssl,
-                timeout=aiohttp.ClientTimeout(total=self._timeout),
-            ) as response:
-                if response.status in (401, 403):
-                    raise WooCommerceAuthError(
-                        f"Authentication failed ({response.status}): {await response.text()}"
-                    )
-                if response.status >= 400:
-                    raise WooCommerceApiError(
-                        f"API request failed with HTTP status {response.status}: {await response.text()}"
-                    )
-                return await response.json()
-        except (aiohttp.ClientConnectorError, aiohttp.ServerTimeoutError, asyncio.TimeoutError) as err:
-            raise WooCommerceConnectionError(f"Connection to WooCommerce failed: {err}") from err
-        except (WooCommerceAuthError, WooCommerceApiError):
-            raise
-        except Exception as err:
-            raise WooCommerceApiError(f"Unexpected error communicating with WooCommerce: {err}") from err
+        lock = self._get_rate_lock()
+        async with lock:
+            await self._throttle()
+            try:
+                async with self._session.get(
+                    url,
+                    params=request_params,
+                    headers=headers,
+                    ssl=self._verify_ssl,
+                    timeout=aiohttp.ClientTimeout(total=self._timeout),
+                ) as response:
+                    if response.status in (401, 403):
+                        raise WooCommerceAuthError(
+                            f"Authentication failed ({response.status}): {await response.text()}"
+                        )
+                    if response.status == 429:
+                        retry_header = response.headers.get("Retry-After")
+                        retry_after = (
+                            int(retry_header)
+                            if retry_header and retry_header.isdigit()
+                            else None
+                        )
+                        raise WooCommerceRateLimitError(
+                            f"API rate limit reached (HTTP 429). Retry-After: {retry_header or 'not specified'}",
+                            retry_after=retry_after,
+                        )
+                    if response.status == 503:
+                        raise WooCommerceConnectionError(
+                            "WooCommerce server temporarily unavailable or overloaded (HTTP 503)"
+                        )
+                    if response.status >= 400:
+                        raise WooCommerceApiError(
+                            f"API request failed with HTTP status {response.status}: {await response.text()}"
+                        )
+                    return await response.json()
+            except (aiohttp.ClientConnectorError, aiohttp.ServerTimeoutError, asyncio.TimeoutError) as err:
+                raise WooCommerceConnectionError(f"Connection to WooCommerce failed: {err}") from err
+            except (WooCommerceAuthError, WooCommerceApiError):
+                raise
+            except Exception as err:
+                raise WooCommerceApiError(f"Unexpected error communicating with WooCommerce: {err}") from err
 
     async def _get_headers(
         self,
@@ -133,26 +183,44 @@ class WooCommerceApiClient:
         params: dict[str, Any] | None = None,
         namespace: str = "wc/v3",
     ) -> dict[str, str]:
-        """Execute request and return lowercased response headers."""
+        """Execute request and return lowercased response headers with serialized rate-limiting."""
         url, request_params, headers = self._prepare_request(
             endpoint, params=params, namespace=namespace
         )
 
-        try:
-            async with self._session.get(
-                url,
-                params=request_params,
-                headers=headers,
-                ssl=self._verify_ssl,
-                timeout=aiohttp.ClientTimeout(total=self._timeout),
-            ) as response:
-                if response.status in (401, 403):
-                    raise WooCommerceAuthError(f"Authentication failed ({response.status})")
-                if response.status >= 400:
-                    raise WooCommerceApiError(f"API request failed with HTTP status {response.status}")
-                return {k.lower(): v for k, v in response.headers.items()}
-        except (aiohttp.ClientConnectorError, aiohttp.ServerTimeoutError, asyncio.TimeoutError) as err:
-            raise WooCommerceConnectionError(f"Connection to WooCommerce failed: {err}") from err
+        lock = self._get_rate_lock()
+        async with lock:
+            await self._throttle()
+            try:
+                async with self._session.get(
+                    url,
+                    params=request_params,
+                    headers=headers,
+                    ssl=self._verify_ssl,
+                    timeout=aiohttp.ClientTimeout(total=self._timeout),
+                ) as response:
+                    if response.status in (401, 403):
+                        raise WooCommerceAuthError(f"Authentication failed ({response.status})")
+                    if response.status == 429:
+                        retry_header = response.headers.get("Retry-After")
+                        retry_after = (
+                            int(retry_header)
+                            if retry_header and retry_header.isdigit()
+                            else None
+                        )
+                        raise WooCommerceRateLimitError(
+                            f"API rate limit reached (HTTP 429). Retry-After: {retry_header or 'not specified'}",
+                            retry_after=retry_after,
+                        )
+                    if response.status == 503:
+                        raise WooCommerceConnectionError(
+                            "WooCommerce server temporarily unavailable or overloaded (HTTP 503)"
+                        )
+                    if response.status >= 400:
+                        raise WooCommerceApiError(f"API request failed with HTTP status {response.status}")
+                    return {k.lower(): v for k, v in response.headers.items()}
+            except (aiohttp.ClientConnectorError, aiohttp.ServerTimeoutError, asyncio.TimeoutError) as err:
+                raise WooCommerceConnectionError(f"Connection to WooCommerce failed: {err}") from err
 
     async def test_connection(self) -> bool:
         """Test API connection and credentials."""
@@ -211,19 +279,22 @@ class WooCommerceApiClient:
         # 3. Calculate stock metrics directly from product items
         try:
             pages_to_fetch = min(5, (totals["total"] + 99) // 100) if totals["total"] > 0 else 1
-            tasks = [
-                self._request(
-                    "products",
-                    params={
-                        "per_page": 100,
-                        "page": page,
-                        "status": "publish",
-                        "_fields": "id,name,slug,price,manage_stock,stock_quantity,stock_status,low_stock_amount,total_sales",
-                    },
-                )
-                for page in range(1, pages_to_fetch + 1)
-            ]
-            pages_results = await asyncio.gather(*tasks, return_exceptions=True)
+            pages_results = []
+            for page in range(1, pages_to_fetch + 1):
+                try:
+                    page_data = await self._request(
+                        "products",
+                        params={
+                            "per_page": 100,
+                            "page": page,
+                            "status": "publish",
+                            "_fields": "id,name,slug,price,manage_stock,stock_quantity,stock_status,low_stock_amount,total_sales",
+                        },
+                    )
+                    pages_results.append(page_data)
+                except WooCommerceApiError as err:
+                    _LOGGER.debug("Could not fetch products page %d: %s", page, err)
+                    break
 
             instock = 0
             lowstock = 0
@@ -406,21 +477,12 @@ class WooCommerceApiClient:
             return {}
 
     async def fetch_all_data(self) -> WooCommerceData:
-        """Fetch all store data in parallel."""
-        (
-            orders_totals,
-            products_totals,
-            recent_orders,
-            sales_today,
-            pending_units_by_product,
-        ) = await asyncio.gather(
-            self.get_orders_totals(),
-            self.get_products_totals(),
-            self.get_recent_orders(limit=5),
-            self.get_sales_report(period="today"),
-            self.get_open_orders_by_product(),
-            return_exceptions=False,
-        )
+        """Fetch all store data sequentially with rate limiting."""
+        orders_totals = await self.get_orders_totals()
+        products_totals = await self.get_products_totals()
+        recent_orders = await self.get_recent_orders(limit=5)
+        sales_today = await self.get_sales_report(period="today")
+        pending_units_by_product = await self.get_open_orders_by_product()
         return WooCommerceData(
             orders_totals=orders_totals,
             products_totals=products_totals,

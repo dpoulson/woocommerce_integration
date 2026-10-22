@@ -105,9 +105,17 @@ class WooCommerceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class WooCommerceOptionsFlowHandler(config_entries.OptionsFlow):
     """Handle WooCommerce options."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+    def __init__(self, config_entry: config_entries.ConfigEntry | None = None) -> None:
         """Initialize options flow."""
-        self.config_entry = config_entry
+        if config_entry is not None:
+            self._config_entry = config_entry
+
+    @property
+    def config_entry(self) -> config_entries.ConfigEntry:
+        """Return config entry."""
+        if hasattr(self, "_config_entry"):
+            return self._config_entry
+        return super().config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -128,7 +136,7 @@ class WooCommerceOptionsFlowHandler(config_entries.OptionsFlow):
                     vol.Optional(
                         CONF_UPDATE_INTERVAL,
                         default=current_interval,
-                    ): vol.All(vol.Coerce(int), vol.Clamp(min=30, max=86400)),
+                    ): vol.All(vol.Coerce(int), vol.Clamp(min=60, max=86400)),
                 }
             ),
         )

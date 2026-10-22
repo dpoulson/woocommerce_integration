@@ -8,6 +8,7 @@ from custom_components.woocommerce_store.api import (
     WooCommerceApiClient,
     WooCommerceAuthError,
     WooCommerceConnectionError,
+    WooCommerceRateLimitError,
 )
 
 
@@ -283,4 +284,32 @@ async def test_get_order_and_product():
     product = await client.get_product(20)
     assert product["id"] == 20
     assert product["name"] == "Shirt"
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_error_handling():
+    """Test 429 raises WooCommerceRateLimitError with Retry-After header."""
+    session = MagicMock(spec=aiohttp.ClientSession)
+    client = WooCommerceApiClient("https://example.com", "ck_1", "cs_1", session)
+
+    mock_response = AsyncMock()
+    mock_response.status = 429
+    mock_response.headers = {"Retry-After": "60"}
+    session.get.return_value.__aenter__.return_value = mock_response
+
+    with pytest.raises(WooCommerceRateLimitError) as exc_info:
+        await client.test_connection()
+
+    assert exc_info.value.retry_after == 60
+
+
+@pytest.mark.asyncio
+async def test_request_headers():
+    """Test request headers include Accept and custom User-Agent."""
+    session = MagicMock(spec=aiohttp.ClientSession)
+    client = WooCommerceApiClient("https://example.com", "ck_1", "cs_1", session)
+
+    _, _, headers = client._prepare_request("orders")
+    assert headers["Accept"] == "application/json"
+    assert "HomeAssistant-WooCommerceStore" in headers["User-Agent"]
 

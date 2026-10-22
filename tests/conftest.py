@@ -22,7 +22,16 @@ ha_modules = [
 
 for mod in ha_modules:
     if mod not in sys.modules:
-        sys.modules[mod] = MagicMock()
+        m = MagicMock()
+        m.__path__ = []
+        sys.modules[mod] = m
+
+sys.modules["homeassistant"].config_entries = sys.modules["homeassistant.config_entries"]
+sys.modules["homeassistant"].core = sys.modules["homeassistant.core"]
+sys.modules["homeassistant"].data_entry_flow = sys.modules["homeassistant.data_entry_flow"]
+sys.modules["homeassistant"].helpers = sys.modules["homeassistant.helpers"]
+sys.modules["homeassistant"].components = sys.modules["homeassistant.components"]
+sys.modules["homeassistant.core"].callback = lambda f: f
 
 
 class SensorStateClass(StrEnum):
@@ -69,6 +78,38 @@ class DeviceInfo:
     configuration_url: str
 
 
+class MockOptionsFlow:
+    """Mock base OptionsFlow with read-only config_entry property (as in HA 2025+)."""
+
+    _config_entry: Any = None
+
+    @property
+    def config_entry(self) -> Any:
+        return self._config_entry
+
+    def async_show_form(self, step_id: str, data_schema: Any, errors: Any = None) -> dict[str, Any]:
+        return {"type": "form", "step_id": step_id, "data_schema": data_schema, "errors": errors}
+
+    def async_create_entry(self, title: str = "", data: Any = None) -> dict[str, Any]:
+        return {"type": "create_entry", "title": title, "data": data}
+
+
+class MockConfigFlow:
+    """Mock base ConfigFlow."""
+
+    def __init_subclass__(cls, domain: str | None = None, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        cls.domain = domain
+
+    def async_show_form(self, step_id: str, data_schema: Any, errors: Any = None) -> dict[str, Any]:
+        return {"type": "form", "step_id": step_id, "data_schema": data_schema, "errors": errors}
+
+    def async_create_entry(self, title: str, data: Any) -> dict[str, Any]:
+        return {"type": "create_entry", "title": title, "data": data}
+
+
+sys.modules["homeassistant.config_entries"].OptionsFlow = MockOptionsFlow
+sys.modules["homeassistant.config_entries"].ConfigFlow = MockConfigFlow
 sys.modules["homeassistant.components.sensor"].SensorStateClass = SensorStateClass
 sys.modules["homeassistant.components.sensor"].SensorEntityDescription = SensorEntityDescription
 sys.modules["homeassistant.components.sensor"].SensorEntity = SensorEntity

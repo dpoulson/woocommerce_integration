@@ -25,6 +25,7 @@
     "step": {
       "init": {
         "title": "WooCommerce Options",
+        "description": "Configure the polling frequency. For shared hosting or strict firewall environments, 300 to 900 seconds (5–15 minutes) is recommended to prevent rate-limit blocks.",
         "data": {
           "update_interval": "Data Refresh Interval (seconds)"
         }
